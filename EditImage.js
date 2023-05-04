@@ -1,9 +1,10 @@
 import { useRef, useState } from "react"
-import { Image, useWindowDimensions, PanResponder } from "react-native"
+import { useWindowDimensions, PanResponder, TextInput } from "react-native"
 import { Appbar, Text, useTheme } from "react-native-paper"
-import Animated, { Extrapolation, FlipInEasyX, interpolate, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated"
+import Animated, { Extrapolation, FadeInDown, FadeOutDown, FlipInEasyX, FlipOutEasyX, ZoomInRotate, interpolate, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated"
 import { manipulateAsync, FlipType, SaveFormat } from 'expo-image-manipulator';
-import { captureRef } from 'react-native-view-shot';
+import { captureRef } from "react-native-view-shot"
+import { Image } from "expo-image";
 
 function calculateImageSize(screenWidth, screenHeight, imageWidth, imageHeight) {
     const screenRatio = screenHeight / screenWidth;
@@ -29,37 +30,29 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
     const screenWidth = useWindowDimensions().width
     const screenHeight = useWindowDimensions().height
 
-    const visibleImageDimentions = calculateImageSize(screenWidth, screenHeight - 128, asset.width, asset.height)
-    const differenceX = screenWidth - visibleImageDimentions.width
-    const differenceY = screenHeight - 128 - visibleImageDimentions.height
-
-    console.log(differenceX, differenceY, visibleImageDimentions, screenWidth, screenHeight)
-
     const [hasChanges, setHasChanges] = useState(false)
     const [cropVisible, setCropVisible] = useState(false)
     const [image, setImage] = useState(asset)
 
-    const rotateVal = useSharedValue(0)
-
-    const cropOriginXVal = useSharedValue(differenceX / 2)
-    const cropOriginYVal = useSharedValue(64)
-    const cropWidthVal = useSharedValue(screenWidth - differenceX)
-    const cropHeightVal = useSharedValue(screenHeight - 128)
-
-    const cropRightVal = useSharedValue(0)
-    const cropBottomVal = useSharedValue(64)
+    const visibleImageDimentions = calculateImageSize(screenWidth, screenHeight - 128, image.width, image.height)
+    const differenceX = screenWidth - visibleImageDimentions.width
+    const differenceY = screenHeight - 128 - visibleImageDimentions.height
 
     const viewRef = useRef()
+
+    const submitChanges = async () => {
+        const successImage = await captureRef(viewRef, { format: "jpg", quality: 1 }).then(uri => {
+            const newImage = { ...image }
+            newImage.uri = uri
+            return newImage
+        }).catch(error => console.error("Oops, snapshot failed", error))
+        onSubmit(successImage)
+
+    }
 
     const resetAll = () => {
         setImage(asset)
         setHasChanges(false)
-        cropOriginXVal.value = differenceX / 2
-        cropOriginYVal.value = 64
-        cropWidthVal.value = screenWidth - differenceX
-        cropHeightVal.value = screenHeight - 128
-        cropRightVal.value = 0
-        cropBottomVal.value = 64
     }
 
     const rotateLeft = async () => {
@@ -82,18 +75,113 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
         setHasChanges(true)
     }
 
-    const crop = async () => {
-        /*const result = await captureRef(viewRef.current, {
-            result: 'tmpfile',
-            quality: 1,
-            format: 'png'
-        })
-        console.log(result)
-        const imgCopy = { ...image }
-        imgCopy.uri = result
-        setImage(imgCopy)*/
+    const showCrop = () => setCropVisible(true)
+    const hideCrop = () => setCropVisible(false)
 
-        setImage(asset)
+    const onSubmitCrop = (manipResult) => {
+        hideCrop()
+        setImage(manipResult)
+        setHasChanges(true)
+    }
+
+    return (
+        <Animated.View style={{ height: '100%', width: '100%', backgroundColor: theme.colors.background, position: 'absolute' }} entering={FlipInEasyX} exiting={FlipOutEasyX}>
+            <Appbar.Header>
+                <Appbar.Action icon='close' onPress={onCancel} />
+                <Appbar.Action icon='reload' disabled={!hasChanges} onPress={resetAll} />
+                <Appbar.Action icon='rotate-left' onPress={rotateLeft} style={{ marginStart: 'auto' }} />
+                <Appbar.Action icon='rotate-right' onPress={rotateRight} />
+                <Appbar.Action icon='scissors-cutting' onPress={showCrop} />
+                <Appbar.Action icon='check' disabled={!hasChanges} onPress={submitChanges} />
+            </Appbar.Header>
+            <Animated.View style={[{ flex: 1 }]}>
+                <Animated.View ref={viewRef} style={{ width: visibleImageDimentions.width, height: visibleImageDimentions.height, left: differenceX / 2, top: differenceY / 2 }}>
+                    <Image source={image.uri} style={{ flex: 1 }} contentFit='contain' transition={500} />
+                </Animated.View>
+            </Animated.View>
+            <Appbar.Header>
+                <Appbar.Action icon='sticker-emoji' onPress={() => { }} />
+                <Appbar.Action icon='sticker-text' onPress={() => { }} />
+            </Appbar.Header>
+            {cropVisible ? <CropImage asset={image} onSubmit={onSubmitCrop} onCancel={hideCrop} /> : null}
+        </Animated.View>
+    )
+}
+
+const TextSticker = ({ value, differenceX, differenceY }) => {
+
+    const screenWidth = useWindowDimensions().width
+    const screenHeight = useWindowDimensions().height
+
+    const XVal = useSharedValue(screenWidth / 2)
+    const YVal = useSharedValue(screenHeight / 2)
+
+    const panResponder = PanResponder.create({
+        onStartShouldSetPanResponder: (evt, gestureState) => true,
+        onStartShouldSetPanResponderCapture: (evt, gestureState) => true,
+        onMoveShouldSetPanResponder: (evt, gestureState) => true,
+        onMoveShouldSetPanResponderCapture: (evt, gestureState) => true,
+        onPanResponderMove: (evt, gestureState) => {
+
+            if (gestureState.numberActiveTouches == 2) return
+
+            console.log(gestureState)
+            XVal.value = gestureState.moveX - (differenceX / 2)
+            YVal.value = (gestureState.moveY - 64) - (differenceY / 2)
+        },
+        onPanResponderTerminationRequest: (evt, gestureState) => true,
+        onShouldBlockNativeResponder: (evt, gestureState) => true
+    })
+
+    const textAnimatedStyles = useAnimatedStyle(() => {
+        return {
+            left: XVal.value,
+            top: YVal.value
+        }
+    })
+
+    return (
+        <Animated.View style={[textAnimatedStyles, { position: 'absolute', backgroundColor: 'red' }]}>
+            <Animated.View {...panResponder.panHandlers}>
+                <Animated.Text style={{ color: '#fff', fontSize: 24 }}>
+                    {value}
+                </Animated.Text>
+            </Animated.View>
+        </Animated.View>
+    )
+}
+
+const CropImage = ({ asset, onSubmit, onCancel }) => {
+
+    const theme = useTheme()
+
+    const screenWidth = useWindowDimensions().width
+    const screenHeight = useWindowDimensions().height
+
+    const visibleImageDimentions = calculateImageSize(screenWidth, screenHeight - 128, asset.width, asset.height)
+    const differenceX = screenWidth - visibleImageDimentions.width
+    const differenceY = screenHeight - 128 - visibleImageDimentions.height
+
+    console.log(differenceX, differenceY, visibleImageDimentions, screenWidth, screenHeight)
+
+    const cropOriginXVal = useSharedValue(differenceX / 2)
+    const cropOriginYVal = useSharedValue(64 + differenceY / 2)
+    const cropWidthVal = useSharedValue(screenWidth - differenceX)
+    const cropHeightVal = useSharedValue((screenHeight - 128) - differenceY)
+
+    const cropRightVal = useSharedValue(differenceX / 2)
+    const cropBottomVal = useSharedValue(64 + differenceY / 2)
+
+    const resetValues = () => {
+        cropOriginXVal.value = differenceX / 2
+        cropOriginYVal.value = 64 + differenceY / 2
+        cropWidthVal.value = screenWidth - differenceX
+        cropHeightVal.value = (screenHeight - 128) - differenceY
+        cropRightVal.value = differenceX / 2
+        cropBottomVal.value = 64 + differenceY / 2
+    }
+
+    const crop = async () => {
 
         const cropOriginXPercent = interpolate(cropOriginXVal.value, [differenceX / 2, screenWidth - differenceX], [0, asset.width], { extrapolateLeft: Extrapolation.CLAMP, extrapolateRight: Extrapolation.CLAMP })
         const cropOriginYPercent = interpolate(cropOriginYVal.value, [64 + (differenceY / 2), screenHeight - 64 - (differenceY / 2)], [0, asset.height], { extrapolateLeft: Extrapolation.CLAMP, extrapolateRight: Extrapolation.CLAMP })
@@ -101,7 +189,7 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
         const cropHeightPercent = interpolate(cropHeightVal.value, [0, screenHeight - 128 - differenceY], [0, asset.height], { extrapolateLeft: Extrapolation.CLAMP, extrapolateRight: Extrapolation.CLAMP })
         console.log('OriginX:', cropOriginXPercent, 'OriginY:', cropOriginYPercent, 'CropWidth:', cropWidthPercent, 'CropHeight:', cropHeightPercent, `Image: ${asset.width}x${asset.height}`)
         console.log('Total X:', cropOriginXPercent + cropWidthPercent, 'total Y:', cropOriginYPercent + cropHeightPercent)
-        if (cropOriginXPercent + cropWidthPercent > asset.width || cropOriginYPercent + cropHeightPercent > asset.height) return console.warn('Wrong size!')
+        if (cropOriginXPercent + cropWidthPercent > asset.width || cropOriginYPercent + cropHeightPercent > asset.height || !cropWidthPercent || !cropHeightPercent) return console.warn('Wrong size!')
         const manipResult = await manipulateAsync(
             asset.uri, [{
                 crop: {
@@ -111,12 +199,7 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
                     width: cropWidthPercent
                 }
             }], { compress: 1, format: SaveFormat.PNG })
-        setImage(manipResult)
-        setHasChanges(true)
-    }
-
-    const showCrop = () => {
-        setCropVisible(true)
+        onSubmit(manipResult)
     }
 
     const panResponderTopLeft = PanResponder.create({
@@ -125,11 +208,10 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
         onMoveShouldSetPanResponder: (evt, gestureState) => true,
         onMoveShouldSetPanResponderCapture: (evt, gestureState) => true,
         onPanResponderMove: (evt, gestureState) => {
-            console.log('TOP-LEFT MoveX:', cropOriginXVal.value, 'image width:', screenWidth - differenceX / 2)
             cropOriginXVal.value = gestureState.moveX > differenceX / 2 ? gestureState.moveX : differenceX / 2
             cropOriginYVal.value = gestureState.moveY > 64 + differenceY / 2 ? gestureState.moveY : 64 + differenceY / 2
             cropWidthVal.value = gestureState.moveX > differenceX / 2 ? (screenWidth - gestureState.moveX) - cropRightVal.value : (screenWidth - differenceX / 2) - cropRightVal.value
-            cropHeightVal.value = gestureState.moveY > 64 + differenceY / 2 ? (screenHeight - gestureState.moveY) - cropBottomVal.value : (screenHeight - 64 + differenceY / 2) - cropBottomVal.value
+            cropHeightVal.value = gestureState.moveY > 64 + differenceY / 2 ? (screenHeight - gestureState.moveY) - cropBottomVal.value : (screenHeight - (64 + differenceY / 2)) - cropBottomVal.value
         },
         onPanResponderTerminationRequest: (evt, gestureState) => true,
         onShouldBlockNativeResponder: (evt, gestureState) => true
@@ -143,7 +225,7 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
         onPanResponderMove: (evt, gestureState) => {
             cropOriginYVal.value = gestureState.moveY > 64 + differenceY / 2 ? gestureState.moveY : 64 + differenceY / 2
             cropWidthVal.value = gestureState.moveX < screenWidth - differenceX / 2 ? (screenWidth - cropOriginXVal.value) - (screenWidth - gestureState.moveX) : (screenWidth - cropOriginXVal.value) - (screenWidth - (screenWidth - differenceX / 2))
-            cropHeightVal.value = gestureState.moveY > 64 + differenceY / 2 ? (screenHeight - gestureState.moveY) - cropBottomVal.value : (screenHeight - 64 + differenceY / 2) - cropBottomVal.value
+            cropHeightVal.value = gestureState.moveY > 64 + differenceY / 2 ? (screenHeight - gestureState.moveY) - cropBottomVal.value : (screenHeight - (64 + differenceY / 2)) - cropBottomVal.value
 
             cropRightVal.value = gestureState.moveX < screenWidth - differenceX / 2 ? (screenWidth - gestureState.moveX) : (screenWidth - (screenWidth - differenceX / 2))
         },
@@ -191,54 +273,35 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
         }
     })
 
-    const imageViewAnimatedStyle = useAnimatedStyle(() => {
-        return {
-            transform: [{ rotate: `${rotateVal.value}deg` }]
-        }
-    })
-
     return (
-        <Animated.View style={{ height: '100%', width: '100%', backgroundColor: theme.colors.background, position: 'absolute' }} entering={FlipInEasyX}>
+        <Animated.View style={{ height: '100%', width: '100%', backgroundColor: theme.colors.background, position: 'absolute' }} entering={FadeInDown} exiting={FadeOutDown}>
             <Appbar.Header>
                 <Appbar.Action icon='close' onPress={onCancel} />
-                <Appbar.Action icon='reload' disabled={!hasChanges} onPress={resetAll} />
-                <Appbar.Action icon='rotate-left' onPress={rotateLeft} style={{ marginStart: 'auto' }} />
-                <Appbar.Action icon='rotate-right' onPress={rotateRight} />
-                <Appbar.Action icon='crop-free' onPress={crop} />
-                <Appbar.Action icon='check' disabled={!hasChanges} onPress={onCancel} />
+                <Appbar.Action icon='reload' onPress={resetValues} />
+                <Appbar.Action icon='content-cut' style={{ marginStart: 'auto' }} onPress={crop} />
             </Appbar.Header>
-            <Animated.View style={[{ flex: 1 }]}>
-                <Animated.Image onLayout={e => console.warn(e.nativeEvent)} ref={viewRef} source={{ uri: image.uri }} style={{ flex: 1, resizeMode: 'contain' }} />
+            <Animated.View style={{ flex: 1 }}>
+                <Animated.Image source={{ uri: asset.uri }} style={{ flex: 1, resizeMode: 'contain' }} />
             </Animated.View>
             <Animated.View style={[cropTopLeftAnimatedStyle, { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.0)' }]}>
-                <Animated.View {...panResponderTopLeft.panHandlers} style={{ borderColor: '#fff', borderLeftWidth: 6, borderTopWidth: 6, width: 32, height: 32, position: 'absolute' }} />
-                <Animated.View {...panResponderTopRight.panHandlers} style={{ borderColor: '#fff', borderRightWidth: 6, borderTopWidth: 6, width: 32, height: 32, right: 0, position: 'absolute' }} />
-                <Animated.View {...panResponderBottomLeft.panHandlers} style={{ borderColor: '#fff', borderLeftWidth: 6, borderBottomWidth: 6, width: 32, height: 32, bottom: 0, position: 'absolute' }} />
-                <Animated.View {...panResponderBottomRight.panHandlers} style={{ borderColor: '#fff', borderRightWidth: 6, borderBottomWidth: 6, width: 32, height: 32, bottom: 0, right: 0, position: 'absolute' }} />
-                <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: 1, height: '100%', position: 'absolute' }} />
-                <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: 1, height: '100%', position: 'absolute', right: 0 }} />
-                <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: '100%', height: 1, position: 'absolute', top: 0 }} />
-                <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: '100%', height: 1, position: 'absolute', bottom: 0 }} />
+                <Animated.View {...panResponderTopLeft.panHandlers} style={{ borderColor: '#fff', borderLeftWidth: 4, borderTopWidth: 4, width: 32, height: 32, position: 'absolute' }} />
+                <Animated.View {...panResponderTopRight.panHandlers} style={{ borderColor: '#fff', borderRightWidth: 4, borderTopWidth: 4, width: 32, height: 32, right: 0, position: 'absolute' }} />
+                <Animated.View {...panResponderBottomLeft.panHandlers} style={{ borderColor: '#fff', borderLeftWidth: 4, borderBottomWidth: 4, width: 32, height: 32, bottom: 0, position: 'absolute' }} />
+                <Animated.View {...panResponderBottomRight.panHandlers} style={{ borderColor: '#fff', borderRightWidth: 4, borderBottomWidth: 4, width: 32, height: 32, bottom: 0, right: 0, position: 'absolute' }} />
+                <Animated.View style={{ borderWidth: 0.75, borderColor: 'white', height: '100%', position: 'absolute' }} />
+                <Animated.View style={{ borderWidth: 0.75, borderColor: 'white', height: '100%', position: 'absolute', right: 0 }} />
+                <Animated.View style={{ borderWidth: 0.75, borderColor: 'white', width: '100%', position: 'absolute', top: 0 }} />
+                <Animated.View style={{ borderWidth: 0.75, borderColor: 'white', width: '100%', position: 'absolute', bottom: 0 }} />
             </Animated.View>
             <Appbar.Header>
-                <Appbar.Action icon='sticker' onPress={() => { }} />
+                <Appbar.Action icon='format-vertical-align-center' onPress={() => { }} />
+                <Appbar.Action icon='format-horizontal-align-center' onPress={() => { }} />
+                <Appbar.Action icon='crop-square' style={{ marginStart: 'auto' }} onPress={() => { }} />
+                <Appbar.Action icon='rectangle-outline' onPress={() => { }} />
             </Appbar.Header>
+
         </Animated.View>
     )
 }
-
-/*
-const TestCrop = () => (
-    <Animated.View style={[cropTopLeftAnimatedStyle, { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.0)' }]}>
-        <Animated.View {...panResponderTopLeft.panHandlers} style={{ borderColor: '#fff', borderLeftWidth: 6, borderTopWidth: 6, width: 32, height: 32, position: 'absolute' }} />
-        <Animated.View {...panResponderTopRight.panHandlers} style={{ borderColor: '#fff', borderRightWidth: 6, borderTopWidth: 6, width: 32, height: 32, right: 0, position: 'absolute' }} />
-        <Animated.View {...panResponderBottomLeft.panHandlers} style={{ borderColor: '#fff', borderLeftWidth: 6, borderBottomWidth: 6, width: 32, height: 32, bottom: 0, position: 'absolute' }} />
-        <Animated.View {...panResponderBottomRight.panHandlers} style={{ borderColor: '#fff', borderRightWidth: 6, borderBottomWidth: 6, width: 32, height: 32, bottom: 0, right: 0, position: 'absolute' }} />
-        <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: 1, height: '100%', position: 'absolute' }} />
-        <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: 1, height: '100%', position: 'absolute', right: 0 }} />
-        <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: '100%', height: 1, position: 'absolute', top: 0 }} />
-        <Animated.View style={{ borderWidth: 1, borderColor: 'white', width: '100%', height: 1, position: 'absolute', bottom: 0 }} />
-    </Animated.View>
-)*/
 
 export default EditImage
