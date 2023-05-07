@@ -1,10 +1,11 @@
-import { useRef, useState } from "react"
-import { useWindowDimensions, PanResponder, TextInput } from "react-native"
-import { Appbar, Text, useTheme } from "react-native-paper"
-import Animated, { Extrapolation, FadeInDown, FadeOutDown, FlipInEasyX, FlipOutEasyX, ZoomInRotate, interpolate, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated"
+import { useEffect, useRef, useState } from "react"
+import { useWindowDimensions, PanResponder, TextInput, TouchableOpacity } from "react-native"
+import { Appbar, Button, IconButton, Text, useTheme } from "react-native-paper"
+import Animated, { Extrapolation, FadeInDown, FadeOutDown, FlipInEasyX, FlipOutEasyX, ZoomInRotate, interpolate, useAnimatedStyle, useSharedValue, withDecay, withDelay, withSequence, withSpring, withTiming } from "react-native-reanimated"
 import { manipulateAsync, FlipType, SaveFormat } from 'expo-image-manipulator';
 import { captureRef } from "react-native-view-shot"
 import { Image } from "expo-image";
+import { BackHandler } from "react-native";
 
 function calculateImageSize(screenWidth, screenHeight, imageWidth, imageHeight) {
     const screenRatio = screenHeight / screenWidth;
@@ -33,6 +34,8 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
     const [hasChanges, setHasChanges] = useState(false)
     const [cropVisible, setCropVisible] = useState(false)
     const [image, setImage] = useState(asset)
+
+    const [numberOfTexts, setNumberOfTexts] = useState(0)
 
     const visibleImageDimentions = calculateImageSize(screenWidth, screenHeight - 128, image.width, image.height)
     const differenceX = screenWidth - visibleImageDimentions.width
@@ -84,6 +87,18 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
         setHasChanges(true)
     }
 
+    const handleBack = () => {
+        onCancel()
+        return true
+    }
+
+    useEffect(() => {
+        const backHander = BackHandler.addEventListener('hardwareBackPress', handleBack)
+        return backHander.remove
+    }, [])
+
+    const textsArray = new Array(numberOfTexts).fill(null)
+
     return (
         <Animated.View style={{ height: '100%', width: '100%', backgroundColor: theme.colors.background, position: 'absolute' }} entering={FlipInEasyX} exiting={FlipOutEasyX}>
             <Appbar.Header>
@@ -96,58 +111,102 @@ const EditImage = ({ asset, onSubmit, onCancel }) => {
             </Appbar.Header>
             <Animated.View style={[{ flex: 1 }]}>
                 <Animated.View ref={viewRef} style={{ width: visibleImageDimentions.width, height: visibleImageDimentions.height, left: differenceX / 2, top: differenceY / 2 }}>
-                    <Image source={image.uri} style={{ flex: 1 }} contentFit='contain' transition={500} />
+                    <Image source={image.uri} style={{ flex: 1 }} contentFit='contain' transition={0} />
+                    {textsArray.map((e, i) => <TextSticker key={i} imageWidth={screenWidth - differenceX} imageHeight={screenHeight - differenceY} />)}
                 </Animated.View>
             </Animated.View>
             <Appbar.Header>
                 <Appbar.Action icon='sticker-emoji' onPress={() => { }} />
-                <Appbar.Action icon='sticker-text' onPress={() => { }} />
+                <Appbar.Action icon='sticker-text' onPress={() => setNumberOfTexts(numberOfTexts + 1)} />
             </Appbar.Header>
             {cropVisible ? <CropImage asset={image} onSubmit={onSubmitCrop} onCancel={hideCrop} /> : null}
         </Animated.View>
     )
 }
 
-const TextSticker = ({ value, differenceX, differenceY }) => {
+const TextSticker = ({ imageWidth, imageHeight }) => {
 
     const screenWidth = useWindowDimensions().width
     const screenHeight = useWindowDimensions().height
 
     const XVal = useSharedValue(screenWidth / 2)
     const YVal = useSharedValue(screenHeight / 2)
+    const rotateVal = useSharedValue(0)
+    const scaleVal = useSharedValue(1)
 
-    const panResponder = PanResponder.create({
-        onStartShouldSetPanResponder: (evt, gestureState) => true,
-        onStartShouldSetPanResponderCapture: (evt, gestureState) => true,
-        onMoveShouldSetPanResponder: (evt, gestureState) => true,
-        onMoveShouldSetPanResponderCapture: (evt, gestureState) => true,
+    const textInputRef = useRef()
+
+    const [editVisible, setEditVisible] = useState(false)
+    const [text, setText] = useState('Hejcia')
+
+    let last_x = 0, last_y = 0, last_angle = 0, last_current_angle = 0, double_touch = false
+
+    const panResponder = useRef(PanResponder.create({
+        onMoveShouldSetPanResponder: (evt, gestureState) => Math.abs(gestureState.dx) >= 1 || Math.abs(gestureState.dy) >= 1
+        ,
+        onPanResponderGrant: (evt, gestureState) => {
+            last_x = XVal.value
+            last_y = YVal.value
+            last_angle = rotateVal.value
+        },
         onPanResponderMove: (evt, gestureState) => {
+            //console.log("I was moved")
 
-            if (gestureState.numberActiveTouches == 2) return
+            if (evt.nativeEvent.touches.length == 2) {
 
-            console.log(gestureState)
-            XVal.value = gestureState.moveX - (differenceX / 2)
-            YVal.value = (gestureState.moveY - 64) - (differenceY / 2)
+                const touches = evt.nativeEvent.touches
+
+                const angle = Math.atan2(touches[1].locationY - touches[0].locationY, touches[1].locationX - touches[0].locationX)
+                const distance = Math.sqrt(Math.pow(touches[1].locationY - touches[0].locationY, 2) + Math.pow(touches[1].locationX - touches[0].locationX, 2))
+                scaleVal.value = withSpring(distance / 100, { damping: 10, mass: 0.5 })
+
+                if (!double_touch) {
+                    last_current_angle = angle
+                    double_touch = true
+                    return
+                }
+
+                console.log('Angle:', angle, rotateVal.value)
+                const diff = last_current_angle - angle
+
+                rotateVal.value = last_angle - diff
+                double_touch = true
+            }
+            else double_touch = false
+
+            XVal.value = withSpring(last_x + gestureState.dx, { mass: 0.5 })
+            YVal.value = withSpring(last_y + gestureState.dy, { mass: 0.5 })
+
         },
         onPanResponderTerminationRequest: (evt, gestureState) => true,
         onShouldBlockNativeResponder: (evt, gestureState) => true
-    })
-
+    })).current
     const textAnimatedStyles = useAnimatedStyle(() => {
         return {
             left: XVal.value,
-            top: YVal.value
+            top: YVal.value,
+            transform: [{ rotateZ: `${rotateVal.value}rad` }, { scale: scaleVal.value }]
         }
     })
 
+    const onShow = () => setEditVisible(true)
+    const onHide = () => setEditVisible(false)
+
     return (
-        <Animated.View style={[textAnimatedStyles, { position: 'absolute', backgroundColor: 'red' }]}>
-            <Animated.View {...panResponder.panHandlers}>
-                <Animated.Text style={{ color: '#fff', fontSize: 24 }}>
-                    {value}
-                </Animated.Text>
+        <>
+            <Animated.View {...panResponder.panHandlers} style={[textAnimatedStyles, { position: 'absolute', maxWidth: screenWidth / 2 }]}>
+                <TouchableOpacity activeOpacity={1} onPress={onShow}>
+                    <Animated.Text style={{ color: '#fff', fontSize: 24, textAlign: 'center' }}>
+                        {text}
+                    </Animated.Text>
+                </TouchableOpacity>
             </Animated.View>
-        </Animated.View>
+            {editVisible ? <TouchableOpacity onPress={onHide} style={{ position: 'absolute', backgroundColor: 'rgba(0,0,0,0.5)', width: '100%', height: '100%' }}>
+                <TextInput value={text} multiline ref={textInputRef} autoFocus onChangeText={setText} style={{ color: '#fff', fontSize: 24, textAlign: 'center', top: imageHeight / 8 }} />
+            </TouchableOpacity>
+                : null}
+            {editVisible ? <Button style={{ position: 'absolute', right: 0 }} onPress={onHide}>Gotowe</Button> : null}
+        </>
     )
 }
 
